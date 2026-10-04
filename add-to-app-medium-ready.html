@@ -1,0 +1,955 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Flutter Add-to-App: From the First Screen to a Coherent Hybrid App</title>
+  <style>
+    body { margin: 0; background: #fff; color: #242424; font: 21px/1.58 Georgia, serif; }
+    article { max-width: 760px; margin: 56px auto 96px; padding: 0 24px; }
+    h1, h2, h3 { font-family: Arial, sans-serif; line-height: 1.2; color: #1a1a1a; }
+    h1 { font-size: 42px; margin: 0 0 16px; }
+    h2 { font-size: 29px; margin: 48px 0 18px; }
+    h3 { font-size: 24px; margin: 34px 0 14px; }
+    p, ul, ol, pre { margin: 0 0 23px; }
+    li { margin: 0 0 9px; }
+    pre { overflow-x: auto; padding: 18px 20px; background: #f5f5f5; border-radius: 4px; font: 15px/1.4 Consolas, monospace; white-space: pre; }
+    :not(pre) > code { font: 0.86em Consolas, monospace; background: #f5f5f5; padding: 1px 3px; }
+    a { color: inherit; text-decoration: underline; }
+  </style>
+</head>
+<body>
+<article>
+<h1>Flutter Add-to-App: From the First Screen to a Coherent Hybrid App</h1>
+<p><em>How an existing native application can grow with Flutter while keeping navigation, state, engines, and releases understandable.</em></p>
+<p>Picture an established Android or iOS app. Its dashboard is native, authentication is already in place, and payment belongs to the native flow. A team adds an Orders feature in Flutter. At first, the task appears to be opening one Flutter screen. Then a customer moves from Orders to Order Details, into native payment, back to the dashboard, and later into a different Flutter feature. The architecture has to keep that journey continuous even though it crosses two runtimes.</p>
+<p>The story below follows that journey. It begins with the boundary between native and Flutter, follows an engine as it is created and reused, tracks navigation and shared state, then reaches the build and release decisions that make the integration sustainable. Every technical example and diagram from the source guide is retained.</p>
+<h2>1. What Flutter Add-to-App Actually Means</h2>
+<p>The first decision is what role Flutter plays in the existing application. That definition determines who remains in control when the new feature is introduced.</p>
+<p><strong>Flutter Add-to-App</strong> means integrating Flutter as a module/framework inside an existing native Android or iOS application instead of making Flutter the application&#39;s main entry point.</p>
+<p>The existing application remains the host:</p>
+<p>Flutter officially supports integrating Flutter incrementally into existing applications. On mobile, Flutter supports multiple Flutter instances using a <strong>multi-engine</strong> architecture. Each engine runs an independent Dart program and maintains its own UI and application state.</p>
+<p>The main architectural idea is:</p>
+<pre><code class="language-text">Native Application
+        ↕
+Integration Boundary
+        ↕
+Flutter Runtime
+</code></pre>
+<p>Flutter can access native functionality through mechanisms such as:</p>
+<pre><code class="language-text">MethodChannel
+EventChannel
+BasicMessageChannel
+Pigeon-generated APIs
+Flutter Plugins
+</code></pre>
+<p>Communication does <strong>not automatically synchronize state between Flutter and native</strong>.</p>
+<p>This boundary is why Add-to-App must be planned as integration rather than treated as a screen-launch trick.</p>
+<h2>2. Add-to-App Is More Than Opening Flutter Screens</h2>
+<p>Once the first Flutter screen appears, the team sees that presentation was only the visible part of the work. The customer journey now crosses concerns that a standalone screen demo never exercises.</p>
+<p>A common misunderstanding is:</p>
+<pre><code class="language-text">Add-to-App = Native App opens Flutter Screen
+</code></pre>
+<p>Technically, opening the screen is one of the easier parts.</p>
+<p>The actual architecture involves:</p>
+<pre><code class="language-text">Navigation
+State Synchronization
+Local Storage
+Communication
+Flutter Engine Lifecycle
+Dependency Injection
+Authentication
+Plugin Ownership
+Memory
+Debugging
+Security
+CI/CD
+Release Management
+Migration Strategy
+</code></pre>
+<p>Two of the most complex parts are generally:</p>
+<pre><code class="language-text">1. Navigation
+2. Local Storage / State Synchronization
+</code></pre>
+<p>because these are where ownership frequently crosses the Flutter/native boundary.</p>
+<p>The next step is to give those responsibilities a place to live.</p>
+<h2>3. Core Add-to-App Architecture</h2>
+<p>To keep those concerns from spreading through both codebases, the host and the Flutter module need a deliberate integration boundary.</p>
+<p>A production architecture can look like:</p>
+<pre><code class="language-text">┌─────────────────────────────────────────────┐
+│                 NATIVE APP                  │
+│                                             │
+│ Native UI                                   │
+│ Native Navigation                           │
+│ Native Services                             │
+│ Native Storage                              │
+│ Native Authentication                       │
+│ Native Dependency Injection                 │
+│                                             │
+├─────────────────────────────────────────────┤
+│              INTEGRATION LAYER              │
+│                                             │
+│ FlutterEngine Manager                       │
+│ NativeBridge                                │
+│ Navigation Contract                         │
+│ State Contract                              │
+│ MethodChannel / Pigeon                      │
+│ Lifecycle Coordination                      │
+│                                             │
+├─────────────────────────────────────────────┤
+│                  FLUTTER                    │
+│                                             │
+│ Flutter Core                                │
+│ Flutter Navigation                          │
+│ Flutter State Management                    │
+│ Flutter Networking                          │
+│ Flutter Storage                             │
+│ Flutter Dependency Injection                │
+│ Flutter Features                            │
+│                                             │
+└─────────────────────────────────────────────┘
+</code></pre>
+<p>The <strong>Integration Layer</strong> is important because it prevents native implementation details from leaking throughout Flutter and Flutter implementation details from leaking throughout native code.</p>
+<p>Once the integration layer has a purpose, the team can decide how the Flutter code enters the native build.</p>
+<h2>4. Flutter Module</h2>
+<p>With that boundary in mind, the team can add the Flutter module to the existing project without changing the native app into a Flutter-first app.</p>
+<p>you can create a Flutter module:</p>
+<pre><code class="language-bash">flutter create --template module my_flutter
+</code></pre>
+<p>Conceptually:</p>
+<pre><code class="language-text">Application/
+│
+├── NativeApp/
+│   ├── Android / iOS code
+│   ├── Native Navigation
+│   ├── Native Services
+│   └── Native DI
+│
+└── FlutterModule/
+    ├── lib/
+    ├── pubspec.yaml
+    ├── Flutter Core
+    └── Flutter Features
+</code></pre>
+<p>Flutter officially supports integrating modules into Android and iOS host applications.</p>
+<p>On Android, Flutter supports integration directly with the Gradle build or through an Android Archive (<code>AAR</code>).</p>
+<p>On iOS, Flutter supports integration through mechanisms including generated artifacts/build phases and Swift package integration depending on the chosen setup.</p>
+<p>The build provides the module; the engine is what runs it when a customer reaches a Flutter feature.</p>
+<h2>5. FlutterEngine</h2>
+<p>The module supplies code, but the customer sees a screen only when an engine and a UI container work together. Understanding their separate roles prevents lifecycle surprises.</p>
+<p>A Flutter Engine hosts a Flutter execution environment.</p>
+<p>Conceptually:</p>
+<pre><code class="language-text">FlutterEngine
+│
+├── Dart execution
+├── Dart isolate
+├── Flutter framework
+├── Plugin registry
+├── Platform channels
+├── Rendering pipeline
+├── Flutter state
+└── Flutter application
+</code></pre>
+<p>The UI container is separate from the engine.</p>
+<p>Android:</p>
+<pre><code class="language-text">FlutterActivity or FlutterFragment
+       │
+       └── FlutterEngine
+</code></pre>
+<p>iOS:</p>
+<pre><code class="language-text">FlutterViewController
+       │
+       └── FlutterEngine
+</code></pre>
+<p>Flutter&#39;s APIs allow the engine to exist independently of the UI container, which is important when pre-warming or caching an engine.</p>
+<p>Separating engine from view makes the lifecycle choice explicit.</p>
+<h2>6. Flutter Engine Lifecycle</h2>
+<p>When the customer opens Orders for the first time, the host must decide when to create that engine and when to destroy it.</p>
+<p>There are multiple strategies.</p>
+<h2>Strategy A — Create Engine When Needed</h2>
+<pre><code class="language-text">Native
+  ↓
+User opens Flutter
+  ↓
+Create FlutterEngine
+  ↓
+Start Dart
+  ↓
+Initialize Flutter
+  ↓
+Show Flutter UI
+</code></pre>
+<p>When finished:</p>
+<pre><code class="language-text">Close Flutter
+    ↓
+Destroy FlutterEngine
+</code></pre>
+<p>Advantages:</p>
+<pre><code class="language-text">Simple lifecycle
+Clean state
+Lower persistent memory usage
+</code></pre>
+<p>Disadvantages:</p>
+<pre><code class="language-text">Engine startup latency
+Dart startup
+Plugin initialization
+Flutter application bootstrap
+DI initialization
+</code></pre>
+<p>For frequently accessed Flutter features, repeated initialization might not be desirable.</p>
+<p>The alternative keeps the engine alive, which improves reuse while preserving state.</p>
+<h2>7. Pre-Warmed / Cached Flutter Engine</h2>
+<p>If Orders becomes a frequent destination, paying the full startup cost on every visit may be undesirable. A cached engine changes the experience and the state model.</p>
+<p>Another architecture is:</p>
+<pre><code class="language-text">Native Application Starts
+          ↓
+Create FlutterEngine
+          ↓
+Start Dart
+          ↓
+Initialize Flutter
+          ↓
+Cache FlutterEngine
+          ↓
+Continue Native Application
+</code></pre>
+<p>Later:</p>
+<pre><code class="language-text">User opens Flutter Feature
+          ↓
+Reuse FlutterEngine
+          ↓
+Attach FlutterActivity /
+FlutterViewController
+</code></pre>
+<p>Android conceptually:</p>
+<pre><code class="language-kotlin">val flutterEngine = FlutterEngine(context)
+
+flutterEngine.dartExecutor.executeDartEntrypoint(
+    DartExecutor.DartEntrypoint.createDefault()
+)
+
+FlutterEngineCache
+    .getInstance()
+    .put(&quot;main_flutter_engine&quot;, flutterEngine)
+</code></pre>
+<p>Then:</p>
+<pre><code class="language-kotlin">FlutterActivity
+    .withCachedEngine(&quot;main_flutter_engine&quot;)
+    .build(context)
+</code></pre>
+<p>The important difference is:</p>
+<pre><code class="language-text">FlutterEngine lifetime
+         ≠
+Flutter screen lifetime
+</code></pre>
+<p>That persistence matters even more when the app contains more than one Flutter appearance.</p>
+<h2>8. Flutter Add-to-App Modes</h2>
+<p>Before choosing how many engines to keep, it helps to distinguish mobile Add-to-App from the web model. The distinction determines whether Flutter instances share Dart state.</p>
+<p>Flutter&#39;s current architecture distinguishes between two major Add-to-App modes.</p>
+<p>For mobile: → Multi-engine</p>
+<p>On Android/iOS, each Flutter instance is backed by a separate Flutter Engine and therefore runs its own Dart program/isolate state.</p>
+<p>For web: → Multi-view</p>
+<p>On web, multiple views can share the same Dart program and therefore share Dart objects.</p>
+<p>Mobile Add-to-App currently does not support multi-view in the same way web does.</p>
+<p>With the execution model clear, the team can design how a customer moves between screens.</p>
+<h2>9. Navigation — The First Major Challenge</h2>
+<p>Now follow the customer beyond the first rendered screen. Navigation is the first place where the native and Flutter worlds must agree on ownership.</p>
+<p>With Add-to-App, you effectively have:</p>
+<pre><code class="language-text">Native Navigation
+        +
+Flutter Navigation
+</code></pre>
+<p>These are separate navigation systems.</p>
+<p>Three common flows are particularly important:</p>
+<pre><code class="language-text">1. Native → Native
+
+2. Native → Flutter → Flutter
+
+3. Native → Flutter → Native
+</code></pre>
+<p>A larger hybrid application can eventually contain:</p>
+<pre><code class="language-text">Native
+  ↓
+Flutter
+  ↓
+Native
+  ↓
+Flutter
+  ↓
+Native
+</code></pre>
+<p>This is where navigation architecture becomes critical.</p>
+<p>Start with the route that enters Flutter and continues entirely inside it.</p>
+<h2>10. Case 2 — Native → Flutter → Continue in Flutter</h2>
+<p>The simplest cross-boundary journey enters Flutter and stays there for several pages. Native opens the feature; Flutter then guides the customer through its internal flow.</p>
+<p>Example:</p>
+<pre><code class="language-text">Native Dashboard
+        ↓
+Flutter Orders
+        ↓
+Flutter Order Details
+        ↓
+Flutter Order History
+</code></pre>
+<p>The native application needs to create or reuse a Flutter Engine.</p>
+<p>Then it presents the Flutter UI container.</p>
+<p>On iOS:</p>
+<pre><code class="language-text">Native UIViewController
+        ↓
+FlutterViewController
+        ↓
+Flutter Navigator
+</code></pre>
+<p>Once Flutter has been entered:</p>
+<pre><code class="language-text">Flutter Screen A
+       ↓
+Flutter Router
+       ↓
+Flutter Screen B
+       ↓
+Flutter Router
+       ↓
+Flutter Screen C
+</code></pre>
+<p>Flutter should usually handle these internal transitions itself.</p>
+<p>You should avoid sending every Flutter page transition back through native.</p>
+<p>Bad architecture:</p>
+<pre><code class="language-text">Flutter Screen A
+       ↓
+Native
+       ↓
+Tell Flutter to open B
+       ↓
+Flutter B
+</code></pre>
+<p>Preferred architecture:</p>
+<pre><code class="language-text">Native
+   ↓
+Open Flutter Feature
+   ↓
+Flutter Navigator
+   ↓
+Flutter A
+   ↓
+Flutter B
+   ↓
+Flutter C
+</code></pre>
+<p>Native owns the boundary.</p>
+<p>Flutter owns navigation inside its feature/application area.</p>
+<p>The next route leaves Flutter and returns to native code.</p>
+<h2>11. Case 3 — Native → Flutter → Native</h2>
+<p>The journey becomes more interesting when Order Details offers native payment. Flutter must hand the request back to the host without taking over native navigation.</p>
+<p>This flow is considerably more complicated:</p>
+<pre><code class="language-text">Native Dashboard
+       ↓
+Flutter Orders
+       ↓
+Flutter Order Details
+       ↓
+Native Payment
+</code></pre>
+<p>Conceptually:</p>
+<pre><code class="language-text">Native Screen
+      ↓
+FlutterViewController
+      ↓
+Flutter Screen
+      ↓
+MethodChannel / Pigeon
+      ↓
+Native Integration Layer
+      ↓
+Native Navigation Controller
+      ↓
+Native Screen
+</code></pre>
+<p>Flutter does not directly execute something like:</p>
+<pre><code class="language-text">navigationController.pushViewController(...)
+</code></pre>
+<p>because that belongs to the native side.</p>
+<p>Instead Flutter sends an intent:</p>
+<pre><code class="language-text">Open native payment screen
+Order ID = 123
+</code></pre>
+<p>Native receives this request and performs the actual navigation.</p>
+<p>These flows need a stable rule about who is allowed to perform the actual transition.</p>
+<h2>12. Navigation Ownership</h2>
+<p>Both directions work better when ownership is stated as a rule rather than rediscovered at every screen transition.</p>
+<p>A strong architecture has explicit ownership.</p>
+<pre><code class="language-text">Native Root Navigation
+        ↓
+Native
+
+Flutter Internal Navigation
+        ↓
+Flutter
+
+Flutter → Native Request
+        ↓
+Integration Layer
+
+Native → Flutter Destination
+        ↓
+Integration Layer
+</code></pre>
+<p>Flutter should communicate <strong>intent</strong>:</p>
+<pre><code class="language-text">openNativeDestination(
+    payment(orderId: 123)
+)
+</code></pre>
+<p>rather than native implementation details:</p>
+<pre><code class="language-text">Get UINavigationController
+Push PaymentViewController
+</code></pre>
+<p>Flutter should not know those details.</p>
+<p>Native-to-Flutter requests deserve the same structure as Flutter-to-native requests.</p>
+<h2>13. Native → Flutter Destination Contract</h2>
+<p>The same contract is needed when native sends the customer to a particular Flutter destination, such as an invoice detail page.</p>
+<p>The opposite direction should also be structured.</p>
+<p>Instead of:</p>
+<pre><code class="language-text">openOrders()
+openInvoice()
+openCustomer()
+</code></pre>
+<p>you could send:</p>
+<pre><code class="language-text">FlutterDestination
+</code></pre>
+<p>Example:</p>
+<pre><code class="language-json">{
+  &quot;feature&quot;: &quot;invoice&quot;,
+  &quot;action&quot;: &quot;details&quot;,
+  &quot;parameters&quot;: {
+    &quot;invoiceId&quot;: 1005
+  }
+}
+</code></pre>
+<p>Then:</p>
+<pre><code class="language-text">Native
+   ↓
+FlutterHost
+   ↓
+FlutterDestination
+   ↓
+Flutter Router
+   ↓
+InvoiceDetails(1005)
+</code></pre>
+<p>This creates a stable cross-platform navigation API.</p>
+<p>A structured destination still needs to specify what happens to an engine that already holds an older route stack.</p>
+<h2>14. Cached Engine Navigation Problem</h2>
+<p>A cached engine makes that destination contract more important. The UI may be gone while the Flutter navigation stack is still alive.</p>
+<p>A cached engine preserves Flutter state.</p>
+<p>Imagine Flutter has:</p>
+<pre><code class="language-text">Home
+ ↓
+Orders
+ ↓
+OrderDetails
+</code></pre>
+<p>Then Flutter UI closes, but the engine remains alive.</p>
+<p>Later native requests:</p>
+<pre><code class="language-text">Reports
+</code></pre>
+<p>Flutter may still have:</p>
+<pre><code class="language-text">Home
+ ↓
+Orders
+ ↓
+OrderDetails
+</code></pre>
+<p>inside its navigator.</p>
+<p>Therefore the navigation command should contain a mode:</p>
+<pre><code class="language-dart">enum FlutterNavigationMode {
+  push,
+  replace,
+  reset,
+  resume,
+}
+</code></pre>
+<p>Example:</p>
+<pre><code class="language-text">openFlutter(
+    destination: Reports,
+    mode: reset
+)
+</code></pre>
+<p>Meaning:</p>
+<pre><code class="language-text">Ignore previous navigation stack
+        ↓
+Reset
+        ↓
+Open Reports
+</code></pre>
+<p>Another case might use:</p>
+<pre><code class="language-text">resume
+</code></pre>
+<p>to intentionally keep the previous Flutter navigation stack.</p>
+<p>If one shared stack becomes too difficult to manage, multiple Flutter instances offer a different ownership model.</p>
+<h2>15. Multiple Flutter Instances</h2>
+<p>As the app grows, the customer may enter Flutter, visit native, and enter Flutter again within one stack. That is when the team should revisit the one-engine assumption.</p>
+<p>A single cached Flutter Engine is not always the correct architecture.</p>
+<p>Consider:</p>
+<pre><code class="language-text">Native A
+   ↓
+Flutter A
+   ↓
+Native B
+   ↓
+Flutter B
+</code></pre>
+<p>You could potentially reuse one engine, but doing so means Flutter must carefully maintain and restore a shared internal navigation stack.</p>
+<p>Another approach is:</p>
+<pre><code class="language-text">Flutter Instance A
+        +
+Flutter Instance B
+</code></pre>
+<p>Each instance is independent.</p>
+<p>Flutter specifically identifies this architecture for cases where Flutter is not a leaf node in the navigation graph and the stack may contain a mixture such as:</p>
+<pre><code class="language-text">Native
+  ↓
+Flutter
+  ↓
+Native
+  ↓
+Flutter
+</code></pre>
+<p>Each Flutter instance can maintain its own:</p>
+<pre><code class="language-text">Navigation Stack
+Application State
+UI State
+Dart execution
+</code></pre>
+<p>independently.</p>
+<p>Flutter provides a grouped engine API for making those independent instances more efficient.</p>
+<h2>16. FlutterEngineGroup</h2>
+<p>Independent instances need not mean a completely separate engine cost each time. FlutterEngineGroup provides a way to create multiple engines with shared low-level resources.</p>
+<p>Flutter provides:</p>
+<pre><code class="language-text">FlutterEngineGroup
+</code></pre>
+<p>specifically for creating multiple Flutter Engines efficiently.</p>
+<p>Instead of:</p>
+<pre><code class="language-text">FlutterEngine()
+FlutterEngine()
+FlutterEngine()
+</code></pre>
+<p>the architecture becomes:</p>
+<pre><code class="language-text">FlutterEngineGroup
+        │
+    ┌───┼────┐
+    │   │    │
+    ▼   ▼    ▼
+   E1  E2   E3
+</code></pre>
+<p>Each engine remains independent from an application-state point of view.</p>
+<p>However, engines created from the same <code>FlutterEngineGroup</code> can share common engine-level resources.</p>
+<p>Flutter documents examples including:</p>
+<pre><code class="language-text">GPU context
+Font metrics
+Isolate group snapshot
+</code></pre>
+<p>This improves memory usage and engine creation/rendering characteristics compared with completely independent engine initialization.</p>
+<p>Flutter currently documents a low incremental memory cost for additional Flutter instances created using this architecture, although actual application memory should always be measured in your specific project and plugin set.</p>
+<p>The first engine pays the normal initial Flutter-engine startup cost.</p>
+<p>Later engines can benefit from shared resources.</p>
+<p>Flutter&#39;s documentation also notes that the first created engine does not itself have to remain alive forever.</p>
+<p>However, to preserve the shared-resource advantage, at least one engine from the group needs to remain alive.</p>
+<p>The same engine model also enables Flutter to occupy only part of a native page.</p>
+<h2>17. Partial-Screen Flutter Views</h2>
+<p>Not every Flutter appearance fills a whole page. A native screen can also place a Flutter-rendered area among native components.</p>
+<p>Add-to-App is not limited to:</p>
+<pre><code class="language-text">Full Native Screen
+       ↓
+Full Flutter Screen
+</code></pre>
+<p>Another architecture is:</p>
+<pre><code class="language-text">Native Screen
+│
+├── Native Toolbar
+│
+├── Native Component
+│
+├── Flutter-rendered area
+│
+└── Native Button
+</code></pre>
+<p>Flutter officially recognizes partial-screen integration as an Add-to-App use case.</p>
+<p>However, on mobile, multiple Flutter views should be understood in the context of the multi-engine architecture rather than web-style multi-view behavior.</p>
+<p>After deciding where Flutter appears, the team must decide which runtime supplies the data it displays.</p>
+<h2>18. Local Storage and State Synchronization</h2>
+<p>Navigation is only half of the customer journey. After entering Orders, Flutter needs to know which user, company, and session the native host considers current.</p>
+<p>The second major Add-to-App challenge is shared state.</p>
+<p>Technically, Flutter and native may be capable of accessing the same underlying persistent mechanisms when configured properly.</p>
+<p>Examples include:</p>
+<pre><code class="language-text">Keychain
+UserDefaults
+SharedPreferences
+Secure Storage
+Database
+Files
+</code></pre>
+<p>But sharing storage access does not mean state synchronization is automatically solved.</p>
+<p>The following token example makes that state problem concrete.</p>
+<h2>19. Shared Storage Problem</h2>
+<p>A token change shows why reading and writing the same storage is not enough. Follow the value from disk into each runtime cache.</p>
+<p>Example:</p>
+<p>Native writes:</p>
+<pre><code class="language-text">token = A
+</code></pre>
+<p>Flutter reads:</p>
+<pre><code class="language-text">token = A
+</code></pre>
+<p>Later Flutter writes:</p>
+<pre><code class="language-text">token = B
+</code></pre>
+<p>Persistent storage becomes:</p>
+<pre><code class="language-text">token = B
+</code></pre>
+<p>but native may have:</p>
+<pre><code class="language-text">Memory Cache
+
+token = A
+</code></pre>
+<p>Now:</p>
+<pre><code class="language-text">Persistent Storage
+token = B
+
+Native Memory
+token = A
+
+Flutter Memory
+token = B
+</code></pre>
+<p>The application has inconsistent state.</p>
+<p>The solution begins by distinguishing persisted values from the values currently held in memory.</p>
+<h2>20. Shared Storage Is Not Shared Runtime State</h2>
+<p>The inconsistency is a design problem rather than a storage API problem. The team has to decide which side owns each shared value and how the other side hears about changes.</p>
+<p>This distinction is important:</p>
+<pre><code class="language-text">Shared Persistent Storage
+           ≠
+Shared Runtime Memory
+</code></pre>
+<p>Even if both environments read the same Keychain/UserDefaults/etc., each runtime can independently cache data.</p>
+<p>Therefore you need explicit rules.</p>
+<p>For every shared value define:</p>
+<pre><code class="language-text">Who owns it?
+
+Who may modify it?
+
+Who may only read it?
+
+What is the source of truth?
+
+Is it cached?
+
+When must caches be invalidated?
+
+How does the other runtime know it changed?
+
+Should the value be persisted?
+
+Should updates be emitted as events?
+</code></pre>
+<p>Those ownership rules also define what data can be passed once at startup and what requires live updates.</p>
+<h2>21. Passing Initial Data to Flutter</h2>
+<p>At engine startup, native can provide useful context. The team must still separate that initial snapshot from updates that happen later in the session.</p>
+<p>When starting an engine, native may provide initial configuration.</p>
+<p>Examples:</p>
+<pre><code class="language-text">Environment
+Language
+Tenant
+Initial Feature
+Initial Route
+Feature Flags
+User context
+Build configuration
+</code></pre>
+<p>Conceptually:</p>
+<pre><code class="language-text">Native
+   ↓
+Initialize Engine
+   ↓
+Initial Parameters
+   ↓
+Flutter bootstrap()
+</code></pre>
+<p>But after Flutter is initialized:</p>
+<pre><code class="language-text">Initial Parameters
+</code></pre>
+<p>are not an ongoing state channel.</p>
+<p>If state changes later, use:</p>
+<pre><code class="language-text">Platform Channel
+</code></pre>
+<p>or:</p>
+<pre><code class="language-text">Persistent source of truth + change notification
+</code></pre>
+<p>or another explicit synchronization mechanism.</p>
+<p>A bridge for those updates should remain an abstraction, not a chain of services calling back and forth.</p>
+<h2>22. Circular Dependency Risk</h2>
+<p>As more features call across the boundary, a different risk appears: native and Flutter can become dependent on each other in a circle.</p>
+<p>A dangerous architecture:</p>
+<pre><code class="language-text">Native Feature
+      ↓
+Flutter Feature
+      ↓
+Native Service
+      ↓
+Flutter Service
+      ↓
+Native Feature
+</code></pre>
+<p>Now:</p>
+<pre><code class="language-text">Native depends on Flutter
+       ↓
+Flutter depends on Native
+       ↓
+Circular ownership
+</code></pre>
+<p>This makes:</p>
+<pre><code class="language-text">Initialization
+Lifecycle
+Testing
+Navigation
+Release versioning
+Dependency management
+</code></pre>
+<p>much harder.</p>
+<p>Instead:</p>
+<pre><code class="language-text">Native Internals
+        ↓
+Integration Contract
+        ↑
+Flutter Internals
+</code></pre>
+<p>Both sides depend on the integration abstraction rather than deeply depending on each other&#39;s implementation.</p>
+<p>This separation becomes especially important when there is more than one Dart runtime.</p>
+<h2>23. Multiple Engines and Dependency Injection</h2>
+<p>Multiple engines sharpen the ownership question. Dart-level dependency injection belongs to each engine and does not silently become shared application state.</p>
+<p>With multiple Flutter Engines, DI needs extra attention.</p>
+<p>If: Engine A starts Dart application A and: Engine B starts Dart application B,</p>
+<p>then each will generally have its own Dart-level object graph.</p>
+<p>Conceptually:</p>
+<pre><code class="language-text">Engine A
+    ↓
+get_it A
+    ↓
+Repositories A
+
+
+Engine B
+    ↓
+get_it B
+    ↓
+Repositories B
+</code></pre>
+<p>Do not assume:</p>
+<pre><code class="language-text">get_it singleton
+</code></pre>
+<p>is global across every Flutter Engine.</p>
+<p>If global application state must be shared, place ownership outside the independent Dart runtime or synchronize explicitly through native/another source of truth.</p>
+<p>With object ownership established, the team can test the plugins that attach to those runtimes.</p>
+<h2>24. Plugin Limitations in Add-to-App</h2>
+<p>The engine lifecycle also affects plugins. A plugin that works when a Flutter screen is always visible may behave differently in a cached or multi-engine host.</p>
+<p>Flutter&#39;s mobile Add-to-App documentation notes that plugins which make assumptions incompatible with Add-to-App can behave unexpectedly.</p>
+<p>For example, a plugin might incorrectly assume:</p>
+<pre><code class="language-text">A Flutter Activity is always available
+</code></pre>
+<p>which might not be true when the engine exists independently from an attached UI.</p>
+<p>Therefore plugins used in Add-to-App should be tested for:</p>
+<pre><code class="language-text">Engine lifecycle
+Activity attachment
+Multiple engine behavior
+Detach / reattach
+Background behavior
+</code></pre>
+<p>Android Add-to-App currently expects AndroidX applications.</p>
+<p>Plugin compatibility is one constraint; packaging multiple Flutter libraries is another.</p>
+<h2>25. Flutter Add-to-App Mobile Limitation — Multiple Flutter Libraries</h2>
+<p>The phrase multiple Flutter instances can also mislead teams planning their repositories and build artifacts. Mobile packaging has a separate limitation.</p>
+<p>Flutter&#39;s current mobile documentation notes that packaging multiple independent Flutter libraries into one application is not supported.</p>
+<p>The supported architecture should therefore be understood as:</p>
+<pre><code class="language-text">One Flutter module/library
+       ↓
+Potentially multiple FlutterEngine instances
+</code></pre>
+<p>rather than:</p>
+<pre><code class="language-text">Flutter Module A
++
+Flutter Module B
++
+Flutter Module C
+</code></pre>
+<p>packaged independently into one mobile application.</p>
+<p>This is an important difference.</p>
+<p>Multiple Flutters generally means:</p>
+<pre><code class="language-text">Multiple engine instances
+</code></pre>
+<p>not:</p>
+<pre><code class="language-text">Multiple unrelated packaged Flutter modules.
+</code></pre>
+<p>These integration limits are part of the operational and security design of the final application.</p>
+<h2>26. Security</h2>
+<p>Once both runtimes are in the shipped app, security review must cover both native and Dart code as well as the bridge between them.</p>
+<p>The final application contains:</p>
+<pre><code class="language-text">Native Code
++
+Flutter/Dart Code
+</code></pre>
+<p>Security therefore needs to cover both.</p>
+<p>Consider:</p>
+<pre><code class="language-text">Dart obfuscation
+Native obfuscation
+Symbol management
+Secure storage
+Signing
+API secrets
+Sensitive logs
+Environment values
+Debug configuration
+Build artifacts
+</code></pre>
+<p>Do not assume Flutter code is automatically secure because it is compiled.</p>
+<p>Similarly:</p>
+<pre><code class="language-text">API secret inside Flutter
+</code></pre>
+<p>is not inherently protected just because it is Dart.</p>
+<p>Sensitive secrets should normally not be embedded client-side if a backend can own them.</p>
+<p>Security checks need to be built into the same pipeline that produces the combined application.</p>
+<h2>27. CI/CD</h2>
+<p>The same combined ownership applies to delivery. The Flutter module has to reach the final native build in a repeatable, versioned way.</p>
+<p>Add-to-App changes release architecture.</p>
+<p>At minimum:</p>
+<pre><code class="language-text">Flutter Source
+      ↓
+Flutter Build
+      ↓
+Native Application
+      ↓
+Final Android/iOS Build
+</code></pre>
+<p>For larger teams:</p>
+<pre><code class="language-text">Flutter Repository
+       ↓
+Flutter CI
+       ↓
+Analyze
+Test
+Build
+       ↓
+Version Artifact
+       ↓
+Artifact Repository
+       ↓
+Native Repository
+       ↓
+Native CI
+       ↓
+Final Application
+</code></pre>
+<p>This provides reproducible integration.</p>
+<p>A reliable pipeline also makes any later entry-point migration easier to evaluate.</p>
+<h2>28. Entry-Point Migration Risk</h2>
+<p>A team may eventually consider moving the application entry point to Flutter. That is a later migration decision with effects far beyond the next screen.</p>
+<p>Moving from:</p>
+<pre><code class="language-text">Native Entry Point
+</code></pre>
+<p>to:</p>
+<pre><code class="language-text">Flutter Entry Point
+</code></pre>
+<p>can affect:</p>
+<pre><code class="language-text">Application startup
+Deep links
+Push notification routing
+Authentication bootstrap
+Analytics
+Crash reporting
+Navigation
+Background execution
+App lifecycle
+CI/CD
+Release rollback
+</code></pre>
+<p>Therefore this stage should usually happen after Flutter has already become sufficiently mature inside the application.</p>
+<p>Until that migration is justified, a clear native-host architecture can scale with additional Flutter features.</p>
+<h2>29. Recommended Large-Scale Architecture</h2>
+<p>By this stage, the growing app needs one view of the whole architecture. The following layout puts the native host, integration layer, and Flutter features together.</p>
+<p>For a large project:</p>
+<pre><code class="language-text">┌──────────────────────────────────────────────────┐
+│                    NATIVE                        │
+│                                                  │
+│ App Lifecycle                                    │
+│ Root Navigation                                  │
+│ Existing Native Features                         │
+│ Authentication / Session Owner                   │
+│ Platform Services                                │
+│ Existing Native Storage                          │
+│ Native DI                                        │
+│                                                  │
+├──────────────────────────────────────────────────┤
+│              ADD-TO-APP INTEGRATION              │
+│                                                  │
+│ FlutterEngineManager                             │
+│ FlutterEngineGroup if required                   │
+│ NativeBridge                                     │
+│ FlutterDestination                               │
+│ NativeDestination                                │
+│ State / Event Contracts                          │
+│ MethodChannel / Pigeon                           │
+│ Trace / Logging                                  │
+│ Bridge Version                                   │
+│ Lifecycle Coordination                           │
+│                                                  │
+├──────────────────────────────────────────────────┤
+│                    FLUTTER                       │
+│                                                  │
+│ Core                                             │
+│ ├── NativeBridge                                 │
+│ ├── Navigation                                   │
+│ ├── Networking                                   │
+│ ├── DI                                           │
+│ ├── Storage                                      │
+│ ├── Logging                                      │
+│ ├── Analytics                                    │
+│ ├── Localization                                 │
+│ └── Design System                                │
+│                                                  │
+│ Features                                         │
+│ ├── Orders                                       │
+│ ├── Inventory                                    │
+│ ├── Reports                                      │
+│ ├── Customers                                    │
+│ └── ...                                          │
+│                                                  │
+└──────────────────────────────────────────────────┘
+</code></pre>
+<p>The diagram becomes more useful when each responsibility has a named owner and a crossing mechanism.</p>
+<h2>30. Recommended Ownership Matrix</h2>
+<p>The final step is to turn architectural intent into an ownership agreement that engineers can use when the next feature is added.</p>
+<p>Before implementation, create something like:</p>
+<ul>
+<li><strong>Application Lifecycle:</strong> Native — Lifecycle bridge when needed</li>
+<li><strong>Root Navigation:</strong> Native — Native coordinator</li>
+<li><strong>Flutter Navigation:</strong> Flutter — Flutter Router</li>
+<li><strong>Native → Flutter Navigation:</strong> Integration — FlutterDestination</li>
+<li><strong>Flutter → Native Navigation:</strong> Integration — NativeDestination</li>
+<li><strong>Flutter Engine:</strong> Native — FlutterEngineManager</li>
+<li><strong>Multiple Engines:</strong> Native — FlutterEngineGroup</li>
+<li><strong>Authentication:</strong> Native — NativeBridge</li>
+<li><strong>Access Token:</strong> Native — NativeBridge</li>
+<li><strong>Refresh Token:</strong> Native — NativeBridge</li>
+<li><strong>Selected Company:</strong> Explicit owner — State + event</li>
+<li><strong>User:</strong> Explicit owner — Bridge</li>
+<li><strong>Flutter Feature State:</strong> Flutter — Bloc/Cubit</li>
+<li><strong>Flutter Storage:</strong> Flutter — Flutter storage</li>
+<li><strong>Native DB:</strong> Native — Native repository/bridge</li>
+<li><strong>Flutter HTTP:</strong> Flutter where appropriate — Dio</li>
+<li><strong>Native Platform API:</strong> Native — Bridge</li>
+<li><strong>Push Notifications:</strong> Explicit owner — Bridge</li>
+<li><strong>Analytics:</strong> Explicit owner — Bridge/direct</li>
+<li><strong>Flutter DI:</strong> Flutter — get_it</li>
+<li><strong>Native DI:</strong> Native — Native container</li>
+<li><strong>Logs/Tracing:</strong> Shared contract — Trace IDs</li>
+<li><strong>CI Artifact:</strong> Flutter CI — Versioned artifact</li>
+</ul>
+</article>
+</body>
+</html>
